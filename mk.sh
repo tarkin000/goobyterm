@@ -1,7 +1,4 @@
 #!/bin/bash
-BASEDIR="$(dirname $(realpath $0))"
-echo "BASEDIR=$BASEDIR"
-
 #DEBUG=
 DEBUG="-g"
 XFLAGS="-DHAVE_VTE_ASYNC"
