@@ -1,4 +1,3 @@
-/* this version does away with the stack-switcher/sidebar */
 #include <sstream>
 #include <cstdio>
 #include <cstring>
@@ -8,9 +7,7 @@
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
 #include <webkit2/webkit2.h>
-
-#define GT_INITIAL_WIDTH  640
-#define GT_INITIAL_HEIGHT 480
+#include "config.h"
 
 typedef struct {
 	GtkWidget *window;
@@ -26,9 +23,8 @@ typedef struct {
 	GtkWidget *extra;
   WebKitUserContentManager *manager;
 	GList *views;
-	int width;
-	int height;
-	int count;
+	int resize_dimension;
+	const char **whitelist;
 } _App, *App;
 
 static const char *new_tab_html = R"html(
@@ -109,49 +105,115 @@ void on_forward_clicked(GtkButton *btn, App app) {
 	}
 }
 
+gboolean on_tls_error(WebKitWebView *web, gchar *uri, GTlsCertificate *cert, GTlsCertificateFlags errors, App app) {
+	const char **list,*item;
+	WebKitWebContext *ctx = webkit_web_view_get_context(web);
+
+	fprintf(stderr,"TLS error for %s\n",uri);
+	if (app->whitelist) {
+		for(list = app->whitelist; item = *list; ++list) {
+			if (strstr(uri,item)) {
+				webkit_web_context_allow_tls_certificate_for_host(ctx,cert,item);
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+void scale_favicon(cairo_surface_t *surface,GtkImage *img,App app) {
+	GdkPixbuf *src,*dest;
+	GtkWidget *widget;
+	GtkAllocation rect;
+
+	src = gdk_pixbuf_get_from_surface(surface,0,0,cairo_image_surface_get_width(surface),cairo_image_surface_get_height(surface));
+	dest = gdk_pixbuf_scale_simple(src,app->resize_dimension,app->resize_dimension,GDK_INTERP_BILINEAR);
+	gtk_image_set_from_pixbuf(img,dest);
+	gtk_widget_show(GTK_WIDGET(img));
+}
+
+void on_web_focus(WebKitWebView *web, GdkEvent *event, App app) {
+	cairo_surface_t *surface;
+	GdkPixbuf *pb,*pbs;
+	GtkImage *icon;
+	GtkAllocation rect;
+	int w,h;
+
+	if ((surface = webkit_web_view_get_favicon(web)) != NULL) {
+		icon = GTK_IMAGE(gtk_stack_get_child_by_name(GTK_STACK(app->status),"favicon"));
+		scale_favicon(surface,icon,app);
+		gtk_stack_set_visible_child(GTK_STACK(app->status),GTK_WIDGET(icon));
+	} else {
+		gtk_stack_set_visible_child_name(GTK_STACK(app->status),"missing");
+	}
+	g_signal_handlers_disconnect_by_func(G_OBJECT(web),(void *)on_web_focus,app);
+}
+
+void on_notify_favicon(WebKitWebView *web, GParamSpec *pspec, App app) {
+	cairo_surface_t *surface;
+	GtkImage *icon = GTK_IMAGE(gtk_stack_get_child_by_name(GTK_STACK(app->status),"favicon"));
+	int w,h;
+	GtkAllocation rect;
+
+	fprintf(stderr,"icon ready for %s\n",webkit_web_view_get_uri(web));
+	if (web == WEBKIT_WEB_VIEW(app->web)) {
+		if ((surface = webkit_web_view_get_favicon(web)) != NULL) {
+			scale_favicon(surface,icon,app);
+		} else {
+			icon = GTK_IMAGE(gtk_stack_get_child_by_name(GTK_STACK(app->status),"missing"));
+		}
+		gtk_stack_set_visible_child(GTK_STACK(app->status),GTK_WIDGET(icon));
+	}
+	g_signal_handlers_disconnect_by_func(G_OBJECT(web),(void *)on_notify_favicon,app);
+}
+
 void on_load_changed(WebKitWebView *web, WebKitLoadEvent event, App app) {
 	gboolean webfocus = gtk_stack_get_visible_child(GTK_STACK(app->stack)) == GTK_WIDGET(web);
 	const gchar *uri = webkit_web_view_get_uri(web);
 	GtkWidget *widget;
-	cairo_surface_t *surface;
+	GtkAllocation rect;
 
 	switch (event) {
 		case WEBKIT_LOAD_STARTED:
+			widget = gtk_stack_get_child_by_name(GTK_STACK(app->status),"spinner");
+			gtk_spinner_start(GTK_SPINNER(widget));
+		break;
 		case WEBKIT_LOAD_REDIRECTED:
+			widget = gtk_stack_get_child_by_name(GTK_STACK(app->status),"spinner");
+			gtk_spinner_start(GTK_SPINNER(widget));
+		break;
 		case WEBKIT_LOAD_COMMITTED:
+			g_signal_connect(G_OBJECT(web),"notify::favicon",G_CALLBACK(on_notify_favicon),app);
 			gtk_entry_set_text(GTK_ENTRY(app->entry),uri);
-			fprintf(stderr,"loading %s\n",webkit_web_view_get_uri(web));
-			if (webfocus) {
-				widget = gtk_stack_get_child_by_name(GTK_STACK(app->status),"spinner");
-				gtk_spinner_start(GTK_SPINNER(widget));
-				gtk_stack_set_visible_child_name(GTK_STACK(app->status),"spinner");
-			}
+			fprintf(stderr,"committed %s\n",webkit_web_view_get_uri(web));
+			widget = gtk_stack_get_child_by_name(GTK_STACK(app->status),"spinner");
+			gtk_spinner_stop(GTK_SPINNER(widget));
 		break;
 		case WEBKIT_LOAD_FINISHED:
-			if (webfocus) {
-				widget = gtk_stack_get_child_by_name(GTK_STACK(app->status),"favicon");
-				if ((surface = webkit_web_view_get_favicon(web)) != NULL) gtk_image_set_from_surface(GTK_IMAGE(widget),surface);
-				else gtk_image_set_from_icon_name(GTK_IMAGE(widget),"emblem-unreadable",GTK_ICON_SIZE_BUTTON);
-				gtk_stack_set_visible_child_name(GTK_STACK(app->status),"favicon");
-			}
+			widget = gtk_stack_get_child_by_name(GTK_STACK(app->status),"spinner");
+			gtk_spinner_stop(GTK_SPINNER(widget));
+			widget = gtk_stack_get_child_by_name(GTK_STACK(app->status),"favicon");
 		break;
 	}
+	if (webfocus) gtk_stack_set_visible_child(GTK_STACK(app->status),widget);
 }
 
-void my_stack_child_focus_handler(GtkStack *stack, App app) {
+void my_stack_child_focus_handler(GtkStack *widget, GdkEvent *event, App app) {
 	cairo_surface_t *surface;
-	GtkWidget *child = gtk_stack_get_visible_child(stack);
+	GtkWidget *child = gtk_stack_get_visible_child(GTK_STACK(app->stack));
+	GtkAllocation rect;
+	int w,h;
 	
 	if (WEBKIT_IS_WEB_VIEW(child)) {
-		if ((surface = webkit_web_view_get_favicon(WEBKIT_WEB_VIEW(child))) != NULL) {
-			child = gtk_stack_get_child_by_name(GTK_STACK(stack),"favicon");
-			gtk_image_set_from_surface(GTK_IMAGE(child),surface);
-			gtk_stack_set_visible_child(GTK_STACK(app->stack),child);
+		if ((surface = webkit_web_view_get_favicon(WEBKIT_WEB_VIEW(app->web))) != NULL) {
+			child = gtk_stack_get_child_by_name(GTK_STACK(app->status),"favicon");
+			scale_favicon(surface,GTK_IMAGE(child),app);
+			gtk_stack_set_visible_child_name(GTK_STACK(app->status),"favicon");
+		} else {
+			gtk_stack_set_visible_child_name(GTK_STACK(app->status),"missing");
 		}
 	} else if (VTE_IS_TERMINAL(child)) {
-		child = gtk_stack_get_child_by_name(GTK_STACK(stack),"favicon");
-		gtk_image_set_from_icon_name(GTK_IMAGE(child),"utilities-terminal",GTK_ICON_SIZE_BUTTON);
-		gtk_stack_set_visible_child(GTK_STACK(app->stack),child);
+		gtk_stack_set_visible_child_name(GTK_STACK(app->status),"terminal");
 	}
 }
 
@@ -185,7 +247,6 @@ gboolean my_keypress_handler(GtkWidget *widget, GdkEventKey *event, gpointer uda
 	void *tmp;
 	App app = (App)udata;
 	char str[32],*text;
-	cairo_surface_t *surface;
 
 	if (event->state & GDK_MOD1_MASK) {
 		switch (event->keyval) {
@@ -204,19 +265,14 @@ gboolean my_keypress_handler(GtkWidget *widget, GdkEventKey *event, gpointer uda
 SHOW_WEB_VIEW:
 					gtk_stack_set_visible_child(GTK_STACK(app->stack),app->web);
 					if (event->keyval != GDK_KEY_n) gtk_widget_grab_focus(app->web);
-					widget = gtk_stack_get_child_by_name(GTK_STACK(app->status),"favicon");
-					if ((surface = webkit_web_view_get_favicon(WEBKIT_WEB_VIEW(app->web))) != NULL) gtk_image_set_from_surface(GTK_IMAGE(widget),surface);
-					else gtk_image_set_from_icon_name(GTK_IMAGE(widget),"emblem-unreadable",GTK_ICON_SIZE_BUTTON);
-					gtk_stack_set_visible_child_name(GTK_STACK(app->status),"favicon");
 UPDATE_TAB_LABEL:
 					l = g_list_length(app->views);
 					if (i == -1) i = l - 1;
 					if (i == 0) snprintf(str,72,"%d:%d",i,l);
 					else snprintf(str,72,"%d:%d",i,l);
 					gtk_label_set_text(GTK_LABEL(app->tab_label),(const gchar *)&str[0]);
-					return true;
 				}
-				return false;
+				return true;
 			break;
 			case GDK_KEY_9:
 				list_item = g_list_last(app->views);
@@ -275,17 +331,16 @@ UPDATE_TAB_LABEL:
 				webkit_web_view_load_html(WEBKIT_WEB_VIEW(widget),new_tab_html,NULL);
 				app->views = g_list_append(app->views,widget);
 				g_signal_connect(G_OBJECT(widget),"load-changed",G_CALLBACK(on_load_changed),app);
+				g_signal_connect(G_OBJECT(widget),"load-failed-with-tls-errors",G_CALLBACK(on_tls_error),app);
 				gtk_widget_show(widget);
 				gtk_container_add(GTK_CONTAINER(app->stack),widget);
+				gtk_widget_grab_focus(widget);
 				gtk_widget_grab_focus(app->entry);
 				app->web = widget;
 				i = -1;
 				goto SHOW_WEB_VIEW;
 			break;
 			case GDK_KEY_t:
-				widget = gtk_stack_get_child_by_name(GTK_STACK(app->status),"favicon");
-				gtk_image_set_from_icon_name(GTK_IMAGE(widget),"utilities-terminal",GTK_ICON_SIZE_BUTTON);
-				gtk_stack_set_visible_child(GTK_STACK(app->status),widget);
 				gtk_stack_set_visible_child(GTK_STACK(app->stack),app->term);
 				gtk_widget_grab_focus(app->term);
 				return true;
@@ -304,7 +359,6 @@ UPDATE_TAB_LABEL:
 			break;
 			default:
 				(void)app;
-				//fputs("unhandled key\n",stderr);
 		}
 	}
 	return false;
@@ -312,8 +366,9 @@ UPDATE_TAB_LABEL:
 
 int main(int argc, char **argv) {
 	_App app;
+	GtkAllocation rect;
   GtkWidget *tmp;
-	GtkImage *img;
+	GdkPixbuf *pb;
 	WebKitSettings *settings;
 	WebKitWebContext *webctx;
 	gchar *command[] = {g_strdup("/bin/bash"), NULL };
@@ -323,8 +378,12 @@ int main(int argc, char **argv) {
 
 	// window
 	app.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	//gtk_window_set_title(GTK_WINDOW(app.window),"goobyterm");
-	gtk_window_set_default_size(GTK_WINDOW(app.window), GT_INITIAL_WIDTH, GT_INITIAL_HEIGHT);
+#ifdef GOOBYTERM_WHITELIST
+	app.whitelist = GOOBYTERM_WHITELIST;
+#endif
+	app.resize_dimension = GOOBYTERM_FAVICON_SIZE;
+	g_signal_connect(app.window,"delete-event",G_CALLBACK(gtk_main_quit),NULL);
+	gtk_window_set_default_size(GTK_WINDOW(app.window), GOOBYTERM_INITIAL_WIDTH, GOOBYTERM_INITIAL_HEIGHT);
 	gtk_window_set_resizable(GTK_WINDOW(app.window), true);
 	gtk_window_maximize(GTK_WINDOW(app.window));
   gtk_window_set_position(GTK_WINDOW(app.window), GTK_WIN_POS_CENTER);
@@ -336,12 +395,15 @@ int main(int argc, char **argv) {
 
 	// favicon
 	app.status = gtk_stack_new();
+	gtk_stack_set_homogeneous(GTK_STACK(app.status),true);
 	tmp = gtk_image_new_from_icon_name("image-missing",GTK_ICON_SIZE_BUTTON);
 	gtk_stack_add_named(GTK_STACK(app.status),tmp,"missing");
-	tmp = gtk_spinner_new(); 
-	gtk_stack_add_named(GTK_STACK(app.status),tmp,"spinner");
 	tmp = gtk_image_new_from_icon_name("image-missing",GTK_ICON_SIZE_BUTTON);
 	gtk_stack_add_named(GTK_STACK(app.status),tmp,"favicon");
+	tmp = gtk_image_new_from_icon_name("utilities-terminal",GTK_ICON_SIZE_BUTTON);
+	gtk_stack_add_named(GTK_STACK(app.status),tmp,"terminal");
+	tmp = gtk_spinner_new(); 
+	gtk_stack_add_named(GTK_STACK(app.status),tmp,"spinner");
 	gtk_header_bar_pack_start(GTK_HEADER_BAR(app.header),app.status);
 
 	// url area
@@ -369,35 +431,41 @@ int main(int argc, char **argv) {
 	app.tab_label = gtk_label_new("0:1");
 	gtk_header_bar_pack_end(GTK_HEADER_BAR(app.header),app.tab_label);
 
-	// spinner (activity indicator)
-	app.spinner = gtk_spinner_new();
-	gtk_header_bar_pack_end(GTK_HEADER_BAR(app.header),app.spinner);
-	
+	// the stack - main mechanism for switching web tab view & terminal view
 	app.stack = gtk_stack_new();
 	gtk_stack_set_homogeneous(GTK_STACK(app.stack),true);
 	gtk_stack_set_transition_type(GTK_STACK(app.stack),GTK_STACK_TRANSITION_TYPE_NONE);
 	gtk_container_add(GTK_CONTAINER(app.window),app.stack);
 
+	// the browser view, courtesy of WebKit2Gtk
   app.manager = webkit_user_content_manager_new();
   webkit_user_content_manager_register_script_message_handler(app.manager,"external");
-  g_signal_connect(app.manager, "script-message-received::external",G_CALLBACK(my_external_message_received_cb),&app);
   app.web = webkit_web_view_new_with_user_content_manager(app.manager);
 	webctx = webkit_web_view_get_context(WEBKIT_WEB_VIEW(app.web));
 	webkit_web_context_set_favicon_database_directory(webctx,NULL);
-	gtk_widget_show(GTK_WIDGET(app.web));
+#ifdef GOOBYTERM_HOME_URL
+  webkit_web_view_load_uri(WEBKIT_WEB_VIEW(app.web),GOOBYTERM_HOME_URL);
+#else
   webkit_web_view_load_html(WEBKIT_WEB_VIEW(app.web),new_tab_html,NULL);
+#endif
 	app.views = g_list_append(app.views,app.web);
-	
-	gtk_container_add(GTK_CONTAINER(app.stack),app.web);
 
-  g_signal_connect(G_OBJECT(app.web),"load-changed",G_CALLBACK(on_load_changed),&app);
+	// settings for the default view
   settings = webkit_web_view_get_settings(WEBKIT_WEB_VIEW(app.web));
   webkit_settings_set_enable_write_console_messages_to_stdout(settings, true);
   webkit_settings_set_enable_developer_extras(settings, true);
 	webkit_settings_set_enable_javascript(settings,true);
-	//webkit_settings_set_(settings,true);
-	//WebKitWindowProperties *props = webkit_web_view_get_window_properties((WebKitWebView *)app.web);
+	webkit_settings_set_allow_modal_dialogs(settings,true);
 
+	// signals for the default webview
+  g_signal_connect(G_OBJECT(app.web),"load-changed",G_CALLBACK(on_load_changed),&app);
+	g_signal_connect(G_OBJECT(app.web),"load-failed-with-tls-errors",G_CALLBACK(on_tls_error),&app);
+  g_signal_connect(app.manager, "script-message-received::external",G_CALLBACK(my_external_message_received_cb),&app);
+
+	// add it to the app stack
+	gtk_container_add(GTK_CONTAINER(app.stack),app.web);
+
+	// the terminal view, courtesy of the Vte-2.91
 	app.term = vte_terminal_new();
 #ifdef HAVE_VTE_ASYNC
 	/* newer async call */
@@ -422,21 +490,23 @@ int main(int argc, char **argv) {
 			NULL,       /* child pid */
 			(GCancellable *)NULL, (GError **)NULL);
 #endif
+	// terminal settings
 	vte_terminal_set_scroll_on_output(VTE_TERMINAL(app.term), TRUE);
 	vte_terminal_set_scroll_on_keystroke(VTE_TERMINAL(app.term), TRUE);
 	vte_terminal_set_rewrap_on_resize(VTE_TERMINAL(app.term), TRUE);
 	vte_terminal_set_mouse_autohide(VTE_TERMINAL(app.term), TRUE);
 	gtk_container_add(GTK_CONTAINER(app.stack),app.term);
 
-
-	g_signal_connect(app.window,"destroy",G_CALLBACK(gtk_main_quit),NULL);
-
 	/* window (global) keypress handler */
 	gtk_widget_add_events(app.window,GDK_KEY_PRESS_MASK);
 	g_signal_connect(G_OBJECT(app.window),"key_press_event",G_CALLBACK(my_keypress_handler),&app);
 
+	// off to the races
+	g_signal_connect(G_OBJECT(app.stack),"set-focus-child",G_CALLBACK(my_stack_child_focus_handler),&app);
 	gtk_widget_grab_focus(GTK_WIDGET(app.entry));
 	gtk_widget_show_all(GTK_WIDGET(app.window));
+	
 	gtk_main();
+
 	return 0;
 }
