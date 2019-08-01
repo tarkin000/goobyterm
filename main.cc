@@ -247,6 +247,7 @@ gboolean my_keypress_handler(GtkWidget *widget, GdkEventKey *event, gpointer uda
 	void *tmp;
 	App app = (App)udata;
 	char str[32],*text;
+	WebKitWebInspector *inspector;
 
 	if (event->state & GDK_MOD1_MASK) {
 		switch (event->keyval) {
@@ -359,6 +360,19 @@ UPDATE_TAB_LABEL:
 			break;
 			default:
 				(void)app;
+		}
+	} else {
+		switch (event->keyval) {
+			case GDK_KEY_F12:
+				if (gtk_stack_get_visible_child(GTK_STACK(app->stack)) == app->web) {
+					inspector = webkit_web_view_get_inspector(WEBKIT_WEB_VIEW(app->web));
+					if (webkit_web_inspector_is_attached(inspector)) {
+						webkit_web_inspector_close(inspector);
+					} else {
+						webkit_web_inspector_show(inspector);
+					}
+				}
+			break;
 		}
 	}
 	return false;
