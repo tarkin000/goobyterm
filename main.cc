@@ -8,6 +8,7 @@
 #include <gdk/gdk.h>
 #include <webkit2/webkit2.h>
 #include "config.h"
+#include "icon.h"
 
 typedef struct {
 	GtkWidget *window;
@@ -134,10 +135,7 @@ void scale_favicon(cairo_surface_t *surface,GtkImage *img,App app) {
 
 void on_web_focus(WebKitWebView *web, GdkEvent *event, App app) {
 	cairo_surface_t *surface;
-	GdkPixbuf *pb,*pbs;
 	GtkImage *icon;
-	GtkAllocation rect;
-	int w,h;
 
 	if ((surface = webkit_web_view_get_favicon(web)) != NULL) {
 		icon = GTK_IMAGE(gtk_stack_get_child_by_name(GTK_STACK(app->status),"favicon"));
@@ -448,6 +446,7 @@ int main(int argc, char **argv) {
 	_App app;
 	GtkAllocation rect;
   GtkWidget *tmp;
+  GdkPixbufLoader *loader;
 	GdkPixbuf *pb;
 	WebKitSettings *settings;
 	WebKitWebContext *webctx;
@@ -464,6 +463,12 @@ int main(int argc, char **argv) {
 #endif
 	app.resize_dimension = GOOBYTERM_FAVICON_SIZE;
 	g_signal_connect(app.window,"delete-event",G_CALLBACK(gtk_main_quit),NULL);
+
+	// app icon
+	loader = gdk_pixbuf_loader_new();
+	gdk_pixbuf_loader_write(loader,icon240x240_png,icon240x240_png_len,NULL);
+	pb = gdk_pixbuf_loader_get_pixbuf(loader);
+	gtk_window_set_icon(GTK_WINDOW(app.window),pb);
 	gtk_window_set_default_size(GTK_WINDOW(app.window), GOOBYTERM_INITIAL_WIDTH, GOOBYTERM_INITIAL_HEIGHT);
 	gtk_window_set_resizable(GTK_WINDOW(app.window), true);
 	gtk_window_maximize(GTK_WINDOW(app.window));
