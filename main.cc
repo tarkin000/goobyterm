@@ -23,8 +23,8 @@ typedef struct {
 	GtkWidget *extra;
   WebKitUserContentManager *manager;
 	GList *views;
+	GList *whitelist;
 	int resize_dimension;
-	const char **whitelist;
 } _App, *App;
 
 static const char *new_tab_html = R"html(
@@ -83,7 +83,7 @@ GtkWidget* find_child(GtkWidget* parent, const gchar* name) {
 	return NULL;
 }
 
-void my_external_message_received_cb(WebKitUserContentManager *m, WebKitJavascriptResult *r, gpointer udata) {
+void on_external_message_received(WebKitUserContentManager *m, WebKitJavascriptResult *r, gpointer udata) {
 	/* TODO */
 }
 
@@ -106,14 +106,14 @@ void on_forward_clicked(GtkButton *btn, App app) {
 }
 
 gboolean on_tls_error(WebKitWebView *web, gchar *uri, GTlsCertificate *cert, GTlsCertificateFlags errors, App app) {
-	const char **list,*item;
+	GList *list_item;
 	WebKitWebContext *ctx = webkit_web_view_get_context(web);
 
 	fprintf(stderr,"TLS error for %s\n",uri);
 	if (app->whitelist) {
-		for(list = app->whitelist; item = *list; ++list) {
-			if (strstr(uri,item)) {
-				webkit_web_context_allow_tls_certificate_for_host(ctx,cert,item);
+		for (list_item = app->whitelist; list_item != NULL; list_item = list_item->next) {
+			if (strstr(uri,(const char *)list_item->data)) {
+				webkit_web_context_allow_tls_certificate_for_host(ctx,cert,(const gchar *)list_item->data);
 				return true;
 			}
 		}
@@ -198,7 +198,7 @@ void on_load_changed(WebKitWebView *web, WebKitLoadEvent event, App app) {
 	if (webfocus) gtk_stack_set_visible_child(GTK_STACK(app->status),widget);
 }
 
-void my_stack_child_focus_handler(GtkStack *widget, GdkEvent *event, App app) {
+void on_stack_child_focus(GtkStack *widget, GdkEvent *event, App app) {
 	cairo_surface_t *surface;
 	GtkWidget *child = gtk_stack_get_visible_child(GTK_STACK(app->stack));
 	GtkAllocation rect;
@@ -217,7 +217,7 @@ void my_stack_child_focus_handler(GtkStack *widget, GdkEvent *event, App app) {
 	}
 }
 
-gboolean my_url_dialog_keypress_handler(GtkWidget *widget, GdkEventKey *event, gpointer udata) {
+gboolean on_url_dialog_keypress(GtkWidget *widget, GdkEventKey *event, gpointer udata) {
 	GtkDialog *dialog = GTK_DIALOG(udata);
 
 	if (!(event->state & GDK_MOD1_MASK & GDK_CONTROL_MASK)) {
@@ -229,11 +229,7 @@ gboolean my_url_dialog_keypress_handler(GtkWidget *widget, GdkEventKey *event, g
 	return false;
 }
 
-gboolean my_entry_focus_out_handler(GtkEntry *entry, GdkEvent *event, gpointer udata) {
-	return false;	
-}
-
-void my_entry_activate_handler(GtkEntry *entry, App app) {
+void on_url_entry_activate(GtkEntry *entry, App app) {
 	const gchar *uri;
 
 	uri = gtk_entry_get_text(entry);
@@ -241,11 +237,51 @@ void my_entry_activate_handler(GtkEntry *entry, App app) {
 	gtk_widget_grab_focus(app->web);
 }
 
-gboolean my_keypress_handler(GtkWidget *widget, GdkEventKey *event, gpointer udata) {
+gboolean on_whitelist_entry_activate(GtkEntry *entry, App app) {
+	const gchar *text = gtk_entry_get_text(entry);
+	GtkListBoxRow *row = GTK_LIST_BOX_ROW(gtk_widget_get_parent(GTK_WIDGET(entry)));
+	int i = gtk_list_box_row_get_index(row);
+	GList *list_item = g_list_nth(app->whitelist,i);
+
+	if (list_item != NULL) {
+		g_free(list_item->data);
+		if (strlen(text)) {
+			list_item->data = g_strdup(text);
+		} else {
+			app->whitelist = g_list_remove(app->whitelist,list_item);
+			gtk_widget_destroy(GTK_WIDGET(row));
+		}
+	} else {
+		fprintf(stderr,"oops: a list box row exists without a backing g_list entry\n");
+	}
+	return true;
+}
+
+gboolean on_whitelist_entry_append(GtkEntry *entry, App app) {
+	const gchar *text = gtk_entry_get_text(entry);
+	GtkWidget *last_entry;
+
+	if (strlen(text) > 3) {
+		app->whitelist = g_list_append(app->whitelist,g_strdup(text));
+		g_signal_handlers_disconnect_by_func(G_OBJECT(entry),(void *)on_whitelist_entry_append,app);
+		g_signal_connect(G_OBJECT(entry),"activate",G_CALLBACK(on_whitelist_entry_activate),app);
+		last_entry = gtk_entry_new();
+		g_signal_connect(G_OBJECT(last_entry),"activate",G_CALLBACK(on_whitelist_entry_activate),app);
+		gtk_entry_set_placeholder_text(GTK_ENTRY(last_entry),"<new domain to whitelist>");
+		g_signal_connect(G_OBJECT(last_entry),"activate",G_CALLBACK(on_whitelist_entry_append),app);
+		gtk_container_add(GTK_CONTAINER(app->extra),last_entry);
+		gtk_widget_grab_focus(last_entry);
+		gtk_widget_show_all(app->dialog);
+	} else {
+		gtk_widget_grab_focus(GTK_WIDGET(entry));
+	}
+	return true;
+}
+
+gboolean on_app_keypress(GtkWidget *widget, GdkEventKey *event, App app) {
 	GList *list_item;
 	int i,l,m = 1;
 	void *tmp;
-	App app = (App)udata;
 	char str[32],*text;
 	WebKitWebInspector *inspector;
 
@@ -346,6 +382,36 @@ UPDATE_TAB_LABEL:
 				gtk_widget_grab_focus(app->term);
 				return true;
 			break;
+			case GDK_KEY_w:
+				app->dialog = gtk_dialog_new_with_buttons(
+						"TLS domain whitelist",
+						GTK_WINDOW(app->window),
+						GTK_DIALOG_DESTROY_WITH_PARENT,
+						"_OK",
+						GTK_RESPONSE_OK,
+						NULL);
+				gtk_dialog_set_default_response(GTK_DIALOG(app->dialog),GTK_RESPONSE_OK);
+				app->extra = gtk_list_box_new();
+				for (list_item = app->whitelist; list_item != NULL; list_item = list_item->next) {
+					tmp = gtk_entry_new();
+					gtk_entry_set_text(GTK_ENTRY(tmp),(const gchar *)list_item->data);
+					g_signal_connect(G_OBJECT(tmp),"activate",G_CALLBACK(on_whitelist_entry_activate),app);
+					gtk_container_add(GTK_CONTAINER(app->extra),GTK_WIDGET(tmp));
+				}
+				tmp = gtk_entry_new();
+				gtk_entry_set_placeholder_text(GTK_ENTRY(tmp),"<new domain to whitelist>");
+				g_signal_connect(G_OBJECT(tmp),"activate",G_CALLBACK(on_whitelist_entry_append),app);
+				gtk_container_add(GTK_CONTAINER(app->extra),GTK_WIDGET(tmp));
+				gtk_container_add(GTK_CONTAINER(gtk_dialog_get_content_area(GTK_DIALOG(app->dialog))),app->extra);
+				g_signal_connect_swapped(G_OBJECT(app->dialog),"destroy",G_CALLBACK(gtk_widget_activate),app->dialog);
+				gtk_widget_show_all(app->dialog);
+				gtk_widget_grab_focus(GTK_WIDGET(tmp));
+				i = gtk_dialog_run(GTK_DIALOG(app->dialog));
+				gtk_widget_destroy(app->dialog);
+				app->dialog = NULL;
+				app->extra = NULL;
+				return true;
+			break;
 			case GDK_KEY_x:
 				if (gtk_stack_get_visible_child(GTK_STACK(app->stack)) == app->web) {
 					if ((void *)g_list_first(app->views) != (void *)app->web) {
@@ -386,14 +452,15 @@ int main(int argc, char **argv) {
 	WebKitSettings *settings;
 	WebKitWebContext *webctx;
 	gchar *command[] = {g_strdup("/bin/bash"), NULL };
-
+	const gchar **wl,*li;
 	app = {};
 	gtk_init(&argc, &argv);
 
 	// window
 	app.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 #ifdef GOOBYTERM_WHITELIST
-	app.whitelist = GOOBYTERM_WHITELIST;
+	wl = GOOBYTERM_WHITELIST;
+	while ((li = *wl++)) app->whitelist = g_list_append(app->whitelist,g_strdup(li));
 #endif
 	app.resize_dimension = GOOBYTERM_FAVICON_SIZE;
 	g_signal_connect(app.window,"delete-event",G_CALLBACK(gtk_main_quit),NULL);
@@ -424,7 +491,7 @@ int main(int argc, char **argv) {
 	app.entry = gtk_entry_new();
 	gtk_entry_set_width_chars(GTK_ENTRY(app.entry),72);
 	gtk_header_bar_pack_start(GTK_HEADER_BAR(app.header),app.entry);
-	g_signal_connect(G_OBJECT(app.entry),"activate",G_CALLBACK(my_entry_activate_handler),&app);
+	g_signal_connect(G_OBJECT(app.entry),"activate",G_CALLBACK(on_url_entry_activate),&app);
 
 	// stop loading button
 	tmp = gtk_button_new_from_stock(GTK_STOCK_STOP);
@@ -474,7 +541,7 @@ int main(int argc, char **argv) {
 	// signals for the default webview
   g_signal_connect(G_OBJECT(app.web),"load-changed",G_CALLBACK(on_load_changed),&app);
 	g_signal_connect(G_OBJECT(app.web),"load-failed-with-tls-errors",G_CALLBACK(on_tls_error),&app);
-  g_signal_connect(app.manager, "script-message-received::external",G_CALLBACK(my_external_message_received_cb),&app);
+  g_signal_connect(app.manager, "script-message-received::external",G_CALLBACK(on_external_message_received),&app);
 
 	// add it to the app stack
 	gtk_container_add(GTK_CONTAINER(app.stack),app.web);
@@ -513,10 +580,10 @@ int main(int argc, char **argv) {
 
 	/* window (global) keypress handler */
 	gtk_widget_add_events(app.window,GDK_KEY_PRESS_MASK);
-	g_signal_connect(G_OBJECT(app.window),"key_press_event",G_CALLBACK(my_keypress_handler),&app);
+	g_signal_connect(G_OBJECT(app.window),"key_press_event",G_CALLBACK(on_app_keypress),&app);
 
 	// off to the races
-	g_signal_connect(G_OBJECT(app.stack),"set-focus-child",G_CALLBACK(my_stack_child_focus_handler),&app);
+	g_signal_connect(G_OBJECT(app.stack),"set-focus-child",G_CALLBACK(on_stack_child_focus),&app);
 	gtk_widget_grab_focus(GTK_WIDGET(app.entry));
 	gtk_widget_show_all(GTK_WIDGET(app.window));
 	

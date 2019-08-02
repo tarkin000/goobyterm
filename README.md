@@ -7,17 +7,18 @@ is not very satisfying.
 
 Last I checked, Google's own chrome(ium) terminal 'app' cannot be tabbed; don't get me started on trying
 to get a native window area from Firefox, and Edge is right out- even with the recent switch to Blink.
-Solutions like GateOne are way too hamfisted; solutions like ttyd and gotty are difficult for someone
+Solutions like GateOne are way too hamfisted; solutions like ttyd and gotty are difficult to modify for someone
 who isn't ready to dive into TSX/JSX, typescript, yarn, gulp, or anything NodeJS-related.
 
 So, after a few days of beating my head against the Gtk API, I present to you: a browser with a terminal widget.
 
 **Hotkeys**:
-- ALT + 0 - 9: switch to WebViews 0 - 9; 0 is always available, always a webview, and cannot be closed
+- ALT + 0 - 9: switch to WebViews 0 - 9; 0 is the 'root' webview, always available, and cannot be closed
 - ALT + j    : triggers popup to select a WebView if you have more than 9; will still navigate to 0-9
 - ALT + l    : set focus to the URL bar
 - ALT + n    : create a new WebView, show it, and set focus to the URL bar
-- ALT + t:   : select the VTE Terminal (running tmux)
+- ALT + t:   : switch to VTE Terminal (running tmux)
+- ALT + w:   : add/remove domains to the TLS whitelist
 - ALT + x    : close the current WebView, IFF a WebView is currently visible and it's not the initial WV
 
 Builds on almost any recent-ish distro that has pkg-config, GTK3, WebKit2Gtk, and VTE 2.91  available; I shudder to think what it
