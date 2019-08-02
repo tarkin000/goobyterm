@@ -8,5 +8,5 @@ if [ "$1" == "old" ]; then
 	shift
 fi
 
-g++ -Wno-deprecated-declarations $DEBUG $XFLAGS -I "$BASEDIR" -I /usr/include/vte-2.91 -o $2 -DWEBVIEW_GTK=1 $(pkg-config --cflags gtk+-3.0 webkit2gtk-4.0 vte-2.91) $1 $(pkg-config --libs gtk+-3.0 webkit2gtk-4.0 vte-2.91)
+g++ -Wno-deprecated-declarations $DEBUG $XFLAGS -o $2 -DWEBVIEW_GTK=1 $(pkg-config --cflags gtk+-3.0 webkit2gtk-4.0 vte-2.91) $1 $(pkg-config --libs gtk+-3.0 webkit2gtk-4.0 vte-2.91)
 
