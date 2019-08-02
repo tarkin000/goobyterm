@@ -25,7 +25,7 @@ typedef struct {
   WebKitUserContentManager *manager;
 	GList *views;
 	GList *whitelist;
-	int resize_dimension;
+	int favicon_size;
 } _App, *App;
 
 static const char *new_tab_html = R"html(
@@ -63,7 +63,7 @@ static std::string url_encode(const std::string &value) {
   return escaped;
 }
 
-GtkWidget* find_child(GtkWidget* parent, const gchar* name) {
+static GtkWidget* find_child(GtkWidget* parent, const gchar* name) {
 	if (g_strcasecmp(gtk_widget_get_name((GtkWidget*)parent), (gchar*)name) == 0) {
 		return parent;
 	}
@@ -84,29 +84,29 @@ GtkWidget* find_child(GtkWidget* parent, const gchar* name) {
 	return NULL;
 }
 
-void on_external_message_received(WebKitUserContentManager *m, WebKitJavascriptResult *r, gpointer udata) {
+static void on_external_message_received(WebKitUserContentManager *m, WebKitJavascriptResult *r, gpointer udata) {
 	/* TODO */
 }
 
-void on_stop_clicked(GtkButton *btn, App app) {
+static void on_stop_clicked(GtkButton *btn, App app) {
 	if (gtk_stack_get_visible_child(GTK_STACK(app->stack)) == app->web) {
 		webkit_web_view_stop_loading(WEBKIT_WEB_VIEW(app->web));
 	}
 }
 
-void on_back_clicked(GtkButton *btn, App app) {
+static void on_back_clicked(GtkButton *btn, App app) {
 	if (gtk_stack_get_visible_child(GTK_STACK(app->stack)) == app->web) {
 		webkit_web_view_go_back(WEBKIT_WEB_VIEW(app->web));
 	}
 }
 
-void on_forward_clicked(GtkButton *btn, App app) {
+static void on_forward_clicked(GtkButton *btn, App app) {
 	if (gtk_stack_get_visible_child(GTK_STACK(app->stack)) == app->web) {
 		webkit_web_view_go_forward(WEBKIT_WEB_VIEW(app->web));
 	}
 }
 
-gboolean on_tls_error(WebKitWebView *web, gchar *uri, GTlsCertificate *cert, GTlsCertificateFlags errors, App app) {
+static gboolean on_tls_error(WebKitWebView *web, gchar *uri, GTlsCertificate *cert, GTlsCertificateFlags errors, App app) {
 	GList *list_item;
 	WebKitWebContext *ctx = webkit_web_view_get_context(web);
 
@@ -122,18 +122,18 @@ gboolean on_tls_error(WebKitWebView *web, gchar *uri, GTlsCertificate *cert, GTl
 	return false;
 }
 
-void scale_favicon(cairo_surface_t *surface,GtkImage *img,App app) {
+static void scale_favicon(cairo_surface_t *surface,GtkImage *img,App app) {
 	GdkPixbuf *src,*dest;
 	GtkWidget *widget;
 	GtkAllocation rect;
 
 	src = gdk_pixbuf_get_from_surface(surface,0,0,cairo_image_surface_get_width(surface),cairo_image_surface_get_height(surface));
-	dest = gdk_pixbuf_scale_simple(src,app->resize_dimension,app->resize_dimension,GDK_INTERP_BILINEAR);
+	dest = gdk_pixbuf_scale_simple(src,app->favicon_size,app->favicon_size,GDK_INTERP_BILINEAR);
 	gtk_image_set_from_pixbuf(img,dest);
 	gtk_widget_show(GTK_WIDGET(img));
 }
 
-void on_web_focus(WebKitWebView *web, GdkEvent *event, App app) {
+static void on_web_focus(WebKitWebView *web, GdkEvent *event, App app) {
 	cairo_surface_t *surface;
 	GtkImage *icon;
 
@@ -147,7 +147,7 @@ void on_web_focus(WebKitWebView *web, GdkEvent *event, App app) {
 	g_signal_handlers_disconnect_by_func(G_OBJECT(web),(void *)on_web_focus,app);
 }
 
-void on_notify_favicon(WebKitWebView *web, GParamSpec *pspec, App app) {
+static void on_notify_favicon(WebKitWebView *web, GParamSpec *pspec, App app) {
 	cairo_surface_t *surface;
 	GtkImage *icon = GTK_IMAGE(gtk_stack_get_child_by_name(GTK_STACK(app->status),"favicon"));
 	int w,h;
@@ -165,7 +165,7 @@ void on_notify_favicon(WebKitWebView *web, GParamSpec *pspec, App app) {
 	g_signal_handlers_disconnect_by_func(G_OBJECT(web),(void *)on_notify_favicon,app);
 }
 
-void on_load_changed(WebKitWebView *web, WebKitLoadEvent event, App app) {
+static void on_load_changed(WebKitWebView *web, WebKitLoadEvent event, App app) {
 	gboolean webfocus = gtk_stack_get_visible_child(GTK_STACK(app->stack)) == GTK_WIDGET(web);
 	const gchar *uri = webkit_web_view_get_uri(web);
 	GtkWidget *widget;
@@ -196,7 +196,7 @@ void on_load_changed(WebKitWebView *web, WebKitLoadEvent event, App app) {
 	if (webfocus) gtk_stack_set_visible_child(GTK_STACK(app->status),widget);
 }
 
-void on_stack_child_focus(GtkStack *widget, GdkEvent *event, App app) {
+static void on_stack_child_focus(GtkStack *widget, GdkEvent *event, App app) {
 	cairo_surface_t *surface;
 	GtkWidget *child = gtk_stack_get_visible_child(GTK_STACK(app->stack));
 	GtkAllocation rect;
@@ -215,7 +215,7 @@ void on_stack_child_focus(GtkStack *widget, GdkEvent *event, App app) {
 	}
 }
 
-gboolean on_url_dialog_keypress(GtkWidget *widget, GdkEventKey *event, gpointer udata) {
+static gboolean on_url_dialog_keypress(GtkWidget *widget, GdkEventKey *event, gpointer udata) {
 	GtkDialog *dialog = GTK_DIALOG(udata);
 
 	if (!(event->state & GDK_MOD1_MASK & GDK_CONTROL_MASK)) {
@@ -227,7 +227,7 @@ gboolean on_url_dialog_keypress(GtkWidget *widget, GdkEventKey *event, gpointer 
 	return false;
 }
 
-void on_url_entry_activate(GtkEntry *entry, App app) {
+static void on_url_entry_activate(GtkEntry *entry, App app) {
 	const gchar *uri;
 
 	uri = gtk_entry_get_text(entry);
@@ -235,7 +235,7 @@ void on_url_entry_activate(GtkEntry *entry, App app) {
 	gtk_widget_grab_focus(app->web);
 }
 
-gboolean on_whitelist_entry_activate(GtkEntry *entry, App app) {
+static gboolean on_whitelist_entry_activate(GtkEntry *entry, App app) {
 	const gchar *text = gtk_entry_get_text(entry);
 	GtkListBoxRow *row = GTK_LIST_BOX_ROW(gtk_widget_get_parent(GTK_WIDGET(entry)));
 	int i = gtk_list_box_row_get_index(row);
@@ -255,7 +255,7 @@ gboolean on_whitelist_entry_activate(GtkEntry *entry, App app) {
 	return true;
 }
 
-gboolean on_whitelist_entry_append(GtkEntry *entry, App app) {
+static gboolean on_whitelist_entry_append(GtkEntry *entry, App app) {
 	const gchar *text = gtk_entry_get_text(entry);
 	GtkWidget *last_entry;
 
@@ -276,7 +276,7 @@ gboolean on_whitelist_entry_append(GtkEntry *entry, App app) {
 	return true;
 }
 
-gboolean on_app_keypress(GtkWidget *widget, GdkEventKey *event, App app) {
+static gboolean on_app_keypress(GtkWidget *widget, GdkEventKey *event, App app) {
 	GList *list_item;
 	int i,l,m = 1;
 	void *tmp;
@@ -457,22 +457,24 @@ int main(int argc, char **argv) {
 
 	// window
 	app.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-#ifdef GOOBYTERM_WHITELIST
-	wl = GOOBYTERM_WHITELIST;
-	while ((li = *wl++)) app->whitelist = g_list_append(app->whitelist,g_strdup(li));
-#endif
-	app.resize_dimension = GOOBYTERM_FAVICON_SIZE;
-	g_signal_connect(app.window,"delete-event",G_CALLBACK(gtk_main_quit),NULL);
-
 	// app icon
 	loader = gdk_pixbuf_loader_new();
 	gdk_pixbuf_loader_write(loader,icon240x240_png,icon240x240_png_len,NULL);
 	pb = gdk_pixbuf_loader_get_pixbuf(loader);
 	gtk_window_set_icon(GTK_WINDOW(app.window),pb);
+	g_signal_connect(app.window,"delete-event",G_CALLBACK(gtk_main_quit),NULL);
 	gtk_window_set_default_size(GTK_WINDOW(app.window), GOOBYTERM_INITIAL_WIDTH, GOOBYTERM_INITIAL_HEIGHT);
 	gtk_window_set_resizable(GTK_WINDOW(app.window), true);
 	gtk_window_maximize(GTK_WINDOW(app.window));
   gtk_window_set_position(GTK_WINDOW(app.window), GTK_WIN_POS_CENTER);
+
+	// app TLS domain whitelist; see config.h
+#ifdef GOOBYTERM_WHITELIST
+	wl = GOOBYTERM_WHITELIST;
+	while ((li = *wl++)) app->whitelist = g_list_append(app->whitelist,g_strdup(li));
+#endif
+	// default favicon size
+	app.favicon_size = GOOBYTERM_FAVICON_SIZE;
 
 	// header bar
 	app.header = gtk_header_bar_new();
