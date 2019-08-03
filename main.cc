@@ -6,6 +6,7 @@
 #include <vte/vte.h>
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
+#include <JavaScriptCore/JavaScript.h>
 #include <webkit2/webkit2.h>
 #include "config.h"
 #include "icon.h"
@@ -15,6 +16,7 @@ typedef struct {
 	GtkWidget *header;
 	GtkWidget *status;
 	GtkWidget *entry;
+	GtkWidget *annunc;
 	GtkWidget *stack;
 	GtkWidget *web;
 	GtkWidget *term;
@@ -25,6 +27,7 @@ typedef struct {
   WebKitUserContentManager *manager;
 	GList *views;
 	GList *whitelist;
+	GtkTextBuffer *annbuf;
 	int favicon_size;
 } _App, *App;
 
@@ -39,10 +42,28 @@ static const char *new_tab_html = R"html(
 </head>
 <body>
 	<h1>New tab</h1>
-  <!-- button onclick="external.invoke('exit')">exit</button -->
+  <button onclick="window.devbug('hello')">Say hello</button>
+  <button onclick="fillLog()">Fill log</button>
   <script type="text/javascript">
-    function foo(n) {
-      console.log('foo');
+		var verbs, nouns, adjectives, adverbs, preposition;
+		nouns = ["bird", "clock", "boy", "plastic", "duck", "teacher", "old lady", "professor", "hamster", "dog"];
+		verbs = ["kicked", "ran", "flew", "dodged", "sliced", "rolled", "died", "breathed", "slept", "killed"];
+		adjectives = ["beautiful", "lazy", "professional", "lovely", "dumb", "rough", "soft", "hot", "vibrating", "slimy"];
+		adverbs = ["slowly", "elegantly", "precisely", "quickly", "sadly", "humbly", "proudly", "shockingly", "calmly", "passionately"];
+		preposition = ["down", "into", "up", "on", "upon", "below", "above", "through", "across", "towards"];
+		function randGen() { return Math.floor(Math.random() * 5); }
+		function sentence() {
+			var rand1 = Math.floor(Math.random() * 10);
+			var rand2 = Math.floor(Math.random() * 10);
+			var rand3 = Math.floor(Math.random() * 10);
+			var rand4 = Math.floor(Math.random() * 10);
+			var rand5 = Math.floor(Math.random() * 10);
+			var rand6 = Math.floor(Math.random() * 10);
+			return ("The " + adjectives[rand1] + " " + nouns[rand2] + " " + adverbs[rand3] + " " + verbs[rand4] + " because some " + nouns[rand1] + " " + adverbs[rand1] + " " + verbs[rand1] + " " + preposition[rand1] + " a " + adjectives[rand2] + " " + nouns[rand5] + " which, became a " + adjectives[rand3] + ", " + adjectives[rand4] + " " + nouns[rand6] + ".");
+		}
+    function fillLog() {
+      var i,s;
+      for (i = 0; i < 23; i++) window.devbug(sentence());
     }
   </script>
 </body>
@@ -84,8 +105,27 @@ static GtkWidget* find_child(GtkWidget* parent, const gchar* name) {
 	return NULL;
 }
 
-static void on_external_message_received(WebKitUserContentManager *m, WebKitJavascriptResult *r, gpointer udata) {
-	/* TODO */
+static gboolean on_delete_ephemeral_dialog(GtkDialog *dialog, GdkEvent *event, App app) {
+	gtk_widget_destroy(app->dialog);
+	app->dialog = NULL;
+	app->extra = NULL;
+	return true;
+}
+
+static void on_external_message_received(WebKitUserContentManager *m, WebKitJavascriptResult *r, App app) {
+	JSGlobalContextRef context = webkit_javascript_result_get_global_context(r);
+  JSValueRef value = webkit_javascript_result_get_value(r);
+  JSStringRef js = JSValueToStringCopy(context, value, NULL);
+  size_t n = JSStringGetMaximumUTF8CStringSize(js),l;
+  char *s = g_new(char, n);
+  JSStringGetUTF8CString(js, s, n);
+  l = strlen(s);
+  gtk_text_buffer_insert_at_cursor(app->annbuf,s,strlen(s));
+  gtk_text_buffer_insert_at_cursor(app->annbuf,"\n",1);
+  if (l > GOOBYTERM_ANNUNC_WIDTH) s[GOOBYTERM_ANNUNC_WIDTH] = '\0';
+  gtk_label_set_text(GTK_LABEL(app->annunc),s);
+  JSStringRelease(js);
+  g_free(s);
 }
 
 static void on_stop_clicked(GtkButton *btn, App app) {
@@ -276,6 +316,12 @@ static gboolean on_whitelist_entry_append(GtkEntry *entry, App app) {
 	return true;
 }
 
+static void on_ephemeral_destroy(GtkWidget *widget, App app) {
+	gtk_widget_destroy(widget);
+	app->dialog = NULL;
+	app->extra = NULL;
+}
+
 static gboolean on_app_keypress(GtkWidget *widget, GdkEventKey *event, App app) {
 	GList *list_item;
 	int i,l,m = 1;
@@ -357,7 +403,31 @@ UPDATE_TAB_LABEL:
 				return true;
 			break;
 			case GDK_KEY_l:
-				gtk_widget_grab_focus(app->entry);
+				GtkStyleContext *style;
+				GtkTextIter sti,eti;
+				gchar *text;
+
+				gtk_text_buffer_get_start_iter(GTK_TEXT_BUFFER(app->annbuf),&sti);
+				gtk_text_buffer_get_end_iter(GTK_TEXT_BUFFER(app->annbuf),&eti);
+				text = gtk_text_buffer_get_text(GTK_TEXT_BUFFER(app->annbuf),&sti,&eti,false);
+
+				app->dialog = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+				gtk_widget_add_events(app->dialog,GDK_KEY_PRESS_MASK);
+				g_signal_connect(G_OBJECT(app->dialog),"key_press_event",G_CALLBACK(on_ephemeral_destroy),&app);
+				g_signal_connect(G_OBJECT(app->dialog),"delete-event",G_CALLBACK(on_ephemeral_destroy),app);
+				gtk_window_set_transient_for(GTK_WINDOW(app->dialog),GTK_WINDOW(app->window));
+				gtk_window_set_title(GTK_WINDOW(app->dialog),"dev log");
+				widget = gtk_scrolled_window_new(NULL,NULL);
+				gtk_scrolled_window_set_propagate_natural_width (GTK_SCROLLED_WINDOW(widget),true);
+				gtk_scrolled_window_set_propagate_natural_height (GTK_SCROLLED_WINDOW(widget),true);
+				gtk_container_add(GTK_CONTAINER(app->dialog),widget);
+				app->extra = gtk_label_new(text);
+				gtk_label_set_selectable(GTK_LABEL(app->extra),true);
+				g_free(text);
+				style = gtk_widget_get_style_context(app->extra);
+				gtk_style_context_add_class(style,"annunc");
+				gtk_container_add(GTK_CONTAINER(widget),app->extra);
+				gtk_widget_show_all(app->dialog);
 				return true;
 			break;
 			case GDK_KEY_n:
@@ -378,6 +448,10 @@ UPDATE_TAB_LABEL:
 			case GDK_KEY_t:
 				gtk_stack_set_visible_child(GTK_STACK(app->stack),app->term);
 				gtk_widget_grab_focus(app->term);
+				return true;
+			break;
+			case GDK_KEY_u:
+				gtk_widget_grab_focus(app->entry);
 				return true;
 			break;
 			case GDK_KEY_w:
@@ -446,27 +520,41 @@ int main(int argc, char **argv) {
 	_App app;
 	GtkAllocation rect;
   GtkWidget *tmp;
+  GtkStyleContext *style;
+  GtkCssProvider *css;
   GdkPixbufLoader *loader;
 	GdkPixbuf *pb;
 	WebKitSettings *settings;
 	WebKitWebContext *webctx;
-	gchar *command[] = {g_strdup("/bin/bash"), NULL };
+	gchar *command[] = {g_strdup(GOOBYTERM_SHELL_CMD), NULL };
 	const gchar **wl,*li;
+
+	// init
 	app = {};
 	gtk_init(&argc, &argv);
 
 	// window
 	app.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	// app icon
-	loader = gdk_pixbuf_loader_new();
-	gdk_pixbuf_loader_write(loader,icon240x240_png,icon240x240_png_len,NULL);
-	pb = gdk_pixbuf_loader_get_pixbuf(loader);
-	gtk_window_set_icon(GTK_WINDOW(app.window),pb);
 	g_signal_connect(app.window,"delete-event",G_CALLBACK(gtk_main_quit),NULL);
 	gtk_window_set_default_size(GTK_WINDOW(app.window), GOOBYTERM_INITIAL_WIDTH, GOOBYTERM_INITIAL_HEIGHT);
 	gtk_window_set_resizable(GTK_WINDOW(app.window), true);
 	gtk_window_maximize(GTK_WINDOW(app.window));
   gtk_window_set_position(GTK_WINDOW(app.window), GTK_WIN_POS_CENTER);
+
+
+	// app icon
+	loader = gdk_pixbuf_loader_new();
+	gdk_pixbuf_loader_write(loader,icon240x240_png,icon240x240_png_len,NULL);
+	pb = gdk_pixbuf_loader_get_pixbuf(loader);
+	gtk_window_set_icon(GTK_WINDOW(app.window),pb);
+	
+	// global styling
+	css = gtk_css_provider_new();
+	(void)gtk_css_provider_load_from_data(css,GOOBYTERM_ANNUNC_CSS,-1,NULL);
+	gtk_style_context_add_provider_for_screen(
+			GDK_SCREEN(gtk_window_get_screen(GTK_WINDOW(app.window))),
+			GTK_STYLE_PROVIDER(css),
+			GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 
 	// app TLS domain whitelist; see config.h
 #ifdef GOOBYTERM_WHITELIST
@@ -494,7 +582,7 @@ int main(int argc, char **argv) {
 	gtk_stack_add_named(GTK_STACK(app.status),tmp,"spinner");
 	gtk_header_bar_pack_start(GTK_HEADER_BAR(app.header),app.status);
 
-	// url area
+	// url entry
 	app.entry = gtk_entry_new();
 	gtk_entry_set_width_chars(GTK_ENTRY(app.entry),72);
 	gtk_header_bar_pack_start(GTK_HEADER_BAR(app.header),app.entry);
@@ -515,8 +603,19 @@ int main(int argc, char **argv) {
 	gtk_header_bar_pack_start(GTK_HEADER_BAR(app.header),tmp);
 	g_signal_connect(G_OBJECT(tmp),"clicked",G_CALLBACK(on_forward_clicked),&app);
 
+	// annunciator widget
+	app.annunc = gtk_label_new("welcome to goobyterm");
+	app.annbuf = gtk_text_buffer_new(NULL);
+	gtk_label_set_width_chars(GTK_LABEL(app.annunc),GOOBYTERM_ANNUNC_WIDTH);
+	gtk_header_bar_pack_start(GTK_HEADER_BAR(app.header),app.annunc);
+
+	// styling for the annunciator widget
+	style = gtk_widget_get_style_context(app.annunc);
+	gtk_style_context_add_class(style,"annunc");
+
 	// tab indicator (label)
 	app.tab_label = gtk_label_new("0:1");
+	gtk_label_set_width_chars(GTK_LABEL(app.tab_label),5);
 	gtk_header_bar_pack_end(GTK_HEADER_BAR(app.header),app.tab_label);
 
 	// the stack - main mechanism for switching web tab view & terminal view
@@ -528,6 +627,7 @@ int main(int argc, char **argv) {
 	// the browser view, courtesy of WebKit2Gtk
   app.manager = webkit_user_content_manager_new();
   webkit_user_content_manager_register_script_message_handler(app.manager,"external");
+  g_signal_connect(app.manager, "script-message-received::external",G_CALLBACK(on_external_message_received),&app);
   app.web = webkit_web_view_new_with_user_content_manager(app.manager);
 	webctx = webkit_web_view_get_context(WEBKIT_WEB_VIEW(app.web));
 	webkit_web_context_set_favicon_database_directory(webctx,NULL);
@@ -548,7 +648,12 @@ int main(int argc, char **argv) {
 	// signals for the default webview
   g_signal_connect(G_OBJECT(app.web),"load-changed",G_CALLBACK(on_load_changed),&app);
 	g_signal_connect(G_OBJECT(app.web),"load-failed-with-tls-errors",G_CALLBACK(on_tls_error),&app);
-  g_signal_connect(app.manager, "script-message-received::external",G_CALLBACK(on_external_message_received),&app);
+
+	// bind our message-passing function to window.external in the root webview
+	webkit_web_view_run_javascript(
+      WEBKIT_WEB_VIEW(app.web),
+      "window.devbug=function(x){window.webkit.messageHandlers.external.postMessage(x)}",
+      NULL, NULL, NULL);
 
 	// add it to the app stack
 	gtk_container_add(GTK_CONTAINER(app.stack),app.web);

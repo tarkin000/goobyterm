@@ -3,7 +3,7 @@
 DEBUG="-g"
 XFLAGS="-DHAVE_VTE_ASYNC"
 
-if [ "$1" == "old" ]; then
+if [ "$1" == "sync" ]; then
 	XFLAGS="-UHAVE_VTE_ASYNC"
 	shift
 fi
