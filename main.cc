@@ -322,6 +322,32 @@ static void on_ephemeral_destroy(GtkWidget *widget, App app) {
 	app->extra = NULL;
 }
 
+static void on_devlog_copy_click(GtkWidget *widget, App app) {
+	gtk_label_select_region(GTK_LABEL(app->extra),0,-1);
+	g_signal_emit_by_name(G_OBJECT(app->extra),"copy-clipboard",NULL);
+}
+
+static void on_devlog_clear_click(GtkWidget *widget, App app) {
+	GtkTextIter sti,eti;
+
+	widget = gtk_message_dialog_new(
+			GTK_WINDOW(app->window),
+			GTK_DIALOG_DESTROY_WITH_PARENT,
+			GTK_MESSAGE_WARNING,
+			GTK_BUTTONS_OK_CANCEL,
+			"really empty dev log contents?");
+	gtk_dialog_set_default_response(GTK_DIALOG(widget),GTK_RESPONSE_CANCEL);
+	g_signal_connect_swapped(G_OBJECT(widget),"delete-event",G_CALLBACK(gtk_widget_activate),widget);
+	gtk_widget_show_all(widget);
+	if (gtk_dialog_run(GTK_DIALOG(widget)) == GTK_RESPONSE_OK) {
+		gtk_text_buffer_get_start_iter(app->annbuf,&sti);
+		gtk_text_buffer_get_end_iter(app->annbuf,&eti);
+		gtk_text_buffer_delete(app->annbuf,&sti,&eti);
+		gtk_label_set_text(GTK_LABEL(app->annunc),"welcome to goobyterm");
+		gtk_widget_destroy(widget);
+	}
+}
+
 static gboolean on_app_keypress(GtkWidget *widget, GdkEventKey *event, App app) {
 	GList *list_item;
 	int i,l,m = 1;
@@ -416,17 +442,28 @@ UPDATE_TAB_LABEL:
 				g_signal_connect(G_OBJECT(app->dialog),"key_press_event",G_CALLBACK(on_ephemeral_destroy),&app);
 				g_signal_connect(G_OBJECT(app->dialog),"delete-event",G_CALLBACK(on_ephemeral_destroy),app);
 				gtk_window_set_transient_for(GTK_WINDOW(app->dialog),GTK_WINDOW(app->window));
-				gtk_window_set_title(GTK_WINDOW(app->dialog),"dev log");
 				widget = gtk_scrolled_window_new(NULL,NULL);
 				gtk_scrolled_window_set_propagate_natural_width (GTK_SCROLLED_WINDOW(widget),true);
 				gtk_scrolled_window_set_propagate_natural_height (GTK_SCROLLED_WINDOW(widget),true);
 				gtk_container_add(GTK_CONTAINER(app->dialog),widget);
 				app->extra = gtk_label_new(text);
 				gtk_label_set_selectable(GTK_LABEL(app->extra),true);
+				g_signal_emit_by_name(G_OBJECT(app->dialog),"set-focus",app->extra);
+				gtk_widget_set_state_flags(app->extra,GTK_STATE_FLAG_NORMAL,true);
 				g_free(text);
 				style = gtk_widget_get_style_context(app->extra);
 				gtk_style_context_add_class(style,"annunc");
 				gtk_container_add(GTK_CONTAINER(widget),app->extra);
+				widget = gtk_header_bar_new();
+				gtk_header_bar_set_title(GTK_HEADER_BAR(widget),"dev log");
+				gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(widget),true);
+				tmp = gtk_button_new_with_label("clear log");
+				g_signal_connect(G_OBJECT(tmp),"clicked",G_CALLBACK(on_devlog_clear_click),app);
+				gtk_header_bar_pack_end(GTK_HEADER_BAR(widget),GTK_WIDGET(tmp));
+				tmp = gtk_button_new_with_label("copy all");
+				g_signal_connect(G_OBJECT(tmp),"clicked",G_CALLBACK(on_devlog_copy_click),app);
+				gtk_header_bar_pack_end(GTK_HEADER_BAR(widget),GTK_WIDGET(tmp));
+				gtk_window_set_titlebar(GTK_WINDOW(app->dialog),widget);
 				gtk_widget_show_all(app->dialog);
 				return true;
 			break;

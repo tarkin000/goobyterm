@@ -70,3 +70,4 @@ Changelog:
  < 02-AUG-2019: initial workup
    02-AUG-2019: added annunciator, changed URL entry hotkey
    03-AUG-2019: updated config.h & annunciator; added 'dev-log'
+   03-AUG-2019: improved 'dev log'
