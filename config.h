@@ -23,6 +23,6 @@
 #endif
 
 #ifndef GOOBYTERM_ANNUNC_CSS
-#define GOOBYTERM_ANNUNC_CSS ".annunc { background-color: #111; color: #EE1; margin:2px; }"
+#define GOOBYTERM_ANNUNC_CSS ".annunciator { background-color: #111; color: #EE1; margin:2px; }"
 #endif
 

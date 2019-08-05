@@ -41,7 +41,7 @@ Builds on almost any recent-ish distro that has:
 I shudder to think what it would take to compile on Windows or OS-X.
 
 `config.h` contains some macros that initialize certain internal data, like:
- - appp default width & height
+ - app default width & height
  - initial TLS domains whitelist
  - favicon display size
 
@@ -71,3 +71,4 @@ Changelog:
    02-AUG-2019: added annunciator, changed URL entry hotkey
    03-AUG-2019: updated config.h & annunciator; added 'dev-log'
    03-AUG-2019: improved 'dev log'
+   05-AUG-2019: improved 'dev log'; factored out about:blank; updated README.md & Makefile
