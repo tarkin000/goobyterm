@@ -14,6 +14,7 @@ So, after a few days of beating my head against the Gtk API, I present to you: a
 
 **Hotkeys**:
 - ALT + 0..9 : switch to WebViews 0 - 9; 0 is the 'root' webview, always available, and cannot be closed
+- ALT + e    : show the 'dev log' in the main view area (see **dev log** below)
 - ALT + j    : triggers popup to select a WebView if you have more than 9; will still navigate to 0-9
 - ALT + l    : show a dialog with the contents of the 'dev log' (see **dev log** below)
 - ALT + n    : create a new WebView, show it, and set focus to the URL bar
@@ -25,7 +26,8 @@ So, after a few days of beating my head against the Gtk API, I present to you: a
 **dev log**:
  - As an alternative to `console.log()`, a custom function has been bound to the WebKit Javascript global environment.<br/>
 Actually, it's bound to `window.external(_s_)`, where the only argument _s_ is converted to a string.<br/>
-These strings are added to a GtkTextBuffer managed by the application.<br/>
+These strings are added to VTE Terminal instance managed by the application.<br/>
+The contents of the 'dev log' can be copied and cleared by buttons on the dialog.
 
  - The last string passed is shown in the toolbar area of the application; all lines are displayed in a scrollable window<br/>
 dialog via the 'dev log' hot key (see **Hotkeys** above).
